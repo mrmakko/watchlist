@@ -1,0 +1,120 @@
+:root {
+  --bg: #0d0f12;
+  --card-bg: #16191e;
+  --card-border: #23272e;
+  --muted-border: #3a3f47;
+  --badge-bg: #23272e;
+  --fg: #e8eaed;
+  --fg-dim: #8a909a;
+  --up: #2ebd6b;
+  --down: #f0405a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--card-border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+.title { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+.controls { display: flex; align-items: center; gap: 12px; }
+.toggle { font-size: 12px; color: var(--fg-dim); display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.updated { font-size: 11px; color: var(--fg-dim); }
+
+.add-btn, .add-form button {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--fg);
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.add-btn:hover, .add-form button:hover { border-color: var(--muted-border); }
+
+.add-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--card-border);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.add-form select, .add-form input {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--fg);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.add-form input { min-width: 180px; }
+
+/* Dense grid: fits 50+ compact cards. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 6px;
+  padding: 10px 14px;
+}
+
+.sortable-ghost { opacity: 0.4; }
+.sortable-chosen { cursor: grabbing; }
+
+/* Right-click colour palette */
+.palette {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 7px;
+  background: #1c2026;
+  border: 1px solid var(--muted-border);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px #000a;
+}
+.palette .swatches { display: flex; gap: 5px; }
+.pal-del {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--card-border);
+  color: var(--down);
+  font-size: 12px;
+  text-align: left;
+  padding: 5px 2px 1px;
+  cursor: pointer;
+}
+.pal-del:hover { color: #fff; background: var(--down); border-radius: 4px; }
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid #ffffff22;
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.none {
+  /* default = no group: show a diagonal slash on black */
+  background:
+    linear-gradient(135deg, transparent 44%, var(--down) 44%, var(--down) 56%, transparent 56%),
+    #000 !important;
+}
+.swatch.sel { outline: 2px solid #fff; outline-offset: 1px; }
+.swatch:hover { transform: scale(1.12); }

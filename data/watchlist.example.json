@@ -1,0 +1,5 @@
+[
+  { "id": "binance|BTC/USDT|spot", "exchange": "binance", "symbol": "BTC/USDT", "type": "spot", "color": "none" },
+  { "id": "coinbase|ETH/USD|spot", "exchange": "coinbase", "symbol": "ETH/USD", "type": "spot", "color": "none" },
+  { "id": "kraken|SOL/USD|spot", "exchange": "kraken", "symbol": "SOL/USD", "type": "spot", "color": "none" }
+]

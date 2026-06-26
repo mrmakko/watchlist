@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# build output
+web/dist/
+
+# personal watchlist (seeded from data/watchlist.example.json on first run)
+data/watchlist.json
+
+# editor / OS / local tooling
+.claude/
+.DS_Store
+*.log
