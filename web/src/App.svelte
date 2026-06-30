@@ -207,7 +207,8 @@
 </main>
 
 {#if palette}
-  <div class="palette" style="left:{palette.x}px; top:{palette.y}px" onclick={(e) => e.stopPropagation()}>
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="palette" role="presentation" style="left:{palette.x}px; top:{palette.y}px" onclick={(e) => e.stopPropagation()}>
     <div class="swatches">
       {#each COLOR_KEYS as key}
         <button

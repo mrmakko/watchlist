@@ -46,6 +46,7 @@
   const fmtPct = (v) => (v === null ? '' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="card"
   class:hot
