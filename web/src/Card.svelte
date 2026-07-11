@@ -10,6 +10,7 @@
     onColorMenu,
     onToggleCollapse,
     onChart,
+    editable = false,
     groupSize = 1,
     isCollapsed = false,
     isRep = false,
@@ -55,8 +56,10 @@
   style={style}
   data-id={card.id}
   oncontextmenu={(e) => {
-    e.preventDefault();
-    onColorMenu(card, e);
+    if (editable) {
+      e.preventDefault();
+      onColorMenu(card, e);
+    }
   }}
 >
   <div class="tools">

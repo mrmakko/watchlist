@@ -8,6 +8,7 @@
 
   let authReady = $state(false);
   let authenticated = $state(false);
+  let role = $state(null);
   let pin = $state('');
   let authError = $state('');
   let loggingIn = $state(false);
@@ -84,11 +85,13 @@
   const reloadWatchlist = async () => (watchlist = await getWatchlist());
 
   async function onDelete(id) {
+    if (role !== 'editor') return;
     await deleteCard(id);
     watchlist = watchlist.filter((c) => c.id !== id);
   }
 
   async function onAdd() {
+    if (role !== 'editor') return;
     const symbol = form.symbol.trim().toUpperCase();
     if (!symbol) return;
     try {
@@ -110,10 +113,12 @@
   }
 
   function openColorMenu(card, e) {
+    if (role !== 'editor') return;
     palette = { id: card.id, x: e.clientX, y: e.clientY, current: card.color || 'none' };
   }
 
   async function setColor(color) {
+    if (role !== 'editor') return;
     const id = palette.id;
     palette = null;
     watchlist = watchlist.map((c) => (c.id === id ? { ...c, color } : c));
@@ -126,6 +131,7 @@
 
   // Persist new order after a drag (manual-order mode only).
   async function persistOrder() {
+    if (role !== 'editor') return;
     const ids = [...gridEl.querySelectorAll('[data-id]')].map((el) => el.dataset.id);
     const byId = Object.fromEntries(watchlist.map((c) => [c.id, c]));
     watchlist = ids.map((id) => byId[id]).filter(Boolean);
@@ -137,7 +143,7 @@
   }
 
   onMount(async () => {
-    try { authenticated = (await getAuthStatus()).authenticated; } catch { authenticated = false; }
+    try { const status = await getAuthStatus(); authenticated = status.authenticated; role = status.role; } catch { authenticated = false; }
     authReady = true;
     if (!authenticated) return;
     await tick();
@@ -145,7 +151,7 @@
     await reloadWatchlist();
     await refreshTickers();
 
-    sortable = Sortable.create(gridEl, {
+    if (role === 'editor') sortable = Sortable.create(gridEl, {
       animation: 120,
       handle: '.card',
       draggable: '.card',
@@ -200,7 +206,7 @@
       <input type="checkbox" bind:checked={sortByMove} />
       Sort by movement
     </label>
-    <button class="add-btn" onclick={() => (addOpen = !addOpen)}>+ Add</button>
+    {#if role === 'editor'}<button class="add-btn" onclick={() => (addOpen = !addOpen)}>+ Add</button>{/if}
     <button class="add-btn" onclick={signOut}>Log out</button>
     {#if lastUpdate}
       <span class="updated">updated {lastUpdate.toLocaleTimeString()}</span>
@@ -208,7 +214,7 @@
   </div>
 </header>
 
-{#if addOpen}
+{#if addOpen && role === 'editor'}
   <div class="add-form">
     <select bind:value={form.exchange}>
       {#each supportedList as [id, meta]}
@@ -234,13 +240,14 @@
       isRep={it.isRep}
       hidden={it.hidden}
       onColorMenu={openColorMenu}
+      editable={role === 'editor'}
       onToggleCollapse={toggleCollapse}
       onChart={(c) => (chartCard = c)}
     />
   {/each}
 </main>
 
-{#if palette}
+{#if palette && role === 'editor'}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="palette" role="presentation" style="left:{palette.x}px; top:{palette.y}px" onclick={(e) => e.stopPropagation()}>
     <div class="swatches">

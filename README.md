@@ -47,6 +47,7 @@ The server requires two environment variables:
 
 ```text
 WATCHLIST_PIN=123456
+READONLY_PIN=654321
 AUTH_SECRET=a-long-random-secret-of-at-least-32-characters
 ```
 
@@ -55,3 +56,5 @@ The production cookie uses the host-only `__Host-` prefix, so it is scoped to
 `wl.proofnest.org` and is not shared with other `proofnest.org` subdomains.
 Five failed PIN attempts from one IP cause a 15-minute lockout. If the reverse proxy
 does not connect directly to Node, set `TRUST_PROXY_HOPS` to the exact proxy hop count.
+`WATCHLIST_PIN` grants editing access. `READONLY_PIN` opens the same watchlist while the
+server rejects all add, delete, reorder, and colour-change requests.

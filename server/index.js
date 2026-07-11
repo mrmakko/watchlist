@@ -5,7 +5,7 @@ import { allTickers, dropTicker } from './cache.js';
 import { loadWatchlist, saveWatchlist, cardId } from './watchlist.js';
 import { startPoller, pollCard } from './poller.js';
 import { EXCHANGES, isSupported, fetchCandles } from './adapters/index.js';
-import { authHeaders, authRoutes, requireAuth } from './auth.js';
+import { authHeaders, authRoutes, requireAuth, requireEditor } from './auth.js';
 
 const app = express();
 app.use(express.json());
@@ -50,7 +50,7 @@ app.get('/api/watchlist', async (_req, res) => {
 });
 
 // Replace the whole watchlist (used for reorder).
-app.put('/api/watchlist', async (req, res) => {
+app.put('/api/watchlist', requireEditor, async (req, res) => {
   try {
     if (!Array.isArray(req.body)) return res.status(400).json({ error: 'expected array' });
     const saved = await saveWatchlist(req.body);
@@ -61,7 +61,7 @@ app.put('/api/watchlist', async (req, res) => {
 });
 
 // Add a single card.
-app.post('/api/watchlist', async (req, res) => {
+app.post('/api/watchlist', requireEditor, async (req, res) => {
   try {
     const { exchange, symbol, type = 'spot' } = req.body || {};
     if (!exchange || !symbol) return res.status(400).json({ error: 'exchange and symbol required' });
@@ -84,7 +84,7 @@ app.post('/api/watchlist', async (req, res) => {
 });
 
 // Delete a card by id.
-app.delete('/api/watchlist/:id', async (req, res) => {
+app.delete('/api/watchlist/:id', requireEditor, async (req, res) => {
   try {
     const cards = await loadWatchlist();
     const next = cards.filter((c) => c.id !== req.params.id);
