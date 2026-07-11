@@ -186,9 +186,9 @@
   <div class="auth-screen">
     <form class="auth-card" onsubmit={(e) => { e.preventDefault(); submitPin(); }}>
       <div class="auth-mark">⌁</div><h1>Crypto Watchlist</h1><p>Enter your 6-digit PIN</p>
-      <input class="pin-input" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus bind:value={pin} aria-label="6-digit PIN" />
+      <input class="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="one-time-code" autofocus bind:value={pin} oninput={(e) => { pin = e.currentTarget.value.replace(/\D/g, '').slice(0, 6); }} aria-label="6-digit PIN" />
       {#if authError}<div class="auth-error">{authError}</div>{/if}
-      <button class="unlock-btn" disabled={pin.length !== 6 || loggingIn}>{loggingIn ? 'Checking…' : 'Unlock'}</button>
+      <button class="unlock-btn" disabled={!/^\d{6}$/.test(pin) || loggingIn}>{loggingIn ? 'Checking…' : 'Unlock'}</button>
     </form>
   </div>
 {:else}
