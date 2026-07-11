@@ -1,10 +1,16 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Sortable from 'sortablejs';
   import Card from './Card.svelte';
   import ChartModal from './ChartModal.svelte';
   import { COLOR_KEYS, colorOf } from './colors.js';
-  import { getTickers, getWatchlist, getExchanges, putWatchlist, addCard, deleteCard } from './api.js';
+  import { getTickers, getWatchlist, getExchanges, putWatchlist, addCard, deleteCard, getAuthStatus, login, logout } from './api.js';
+
+  let authReady = $state(false);
+  let authenticated = $state(false);
+  let pin = $state('');
+  let authError = $state('');
+  let loggingIn = $state(false);
 
   let watchlist = $state([]); // ordered [{id, exchange, symbol, type, color}]
   let tickers = $state({}); // id -> ticker data
@@ -131,6 +137,10 @@
   }
 
   onMount(async () => {
+    try { authenticated = (await getAuthStatus()).authenticated; } catch { authenticated = false; }
+    authReady = true;
+    if (!authenticated) return;
+    await tick();
     exchanges = await getExchanges();
     await reloadWatchlist();
     await refreshTickers();
@@ -155,10 +165,33 @@
     };
   });
 
+  async function submitPin() {
+    if (!/^\d{6}$/.test(pin) || loggingIn) return;
+    loggingIn = true; authError = '';
+    try { await login(pin); location.reload(); }
+    catch (e) { authError = e.message; pin = ''; }
+    finally { loggingIn = false; }
+  }
+
+  async function signOut() { await logout(); location.reload(); }
+
   $effect(() => {
     if (sortable) sortable.option('disabled', sortByMove);
   });
 </script>
+
+{#if !authReady}
+  <div class="auth-screen"><div class="auth-card">Loading…</div></div>
+{:else if !authenticated}
+  <div class="auth-screen">
+    <form class="auth-card" onsubmit={(e) => { e.preventDefault(); submitPin(); }}>
+      <div class="auth-mark">⌁</div><h1>Crypto Watchlist</h1><p>Enter your 6-digit PIN</p>
+      <input class="pin-input" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus bind:value={pin} aria-label="6-digit PIN" />
+      {#if authError}<div class="auth-error">{authError}</div>{/if}
+      <button class="unlock-btn" disabled={pin.length !== 6 || loggingIn}>{loggingIn ? 'Checking…' : 'Unlock'}</button>
+    </form>
+  </div>
+{:else}
 
 <header>
   <div class="title">⌁ Crypto Watchlist</div>
@@ -168,6 +201,7 @@
       Sort by movement
     </label>
     <button class="add-btn" onclick={() => (addOpen = !addOpen)}>+ Add</button>
+    <button class="add-btn" onclick={signOut}>Log out</button>
     {#if lastUpdate}
       <span class="updated">updated {lastUpdate.toLocaleTimeString()}</span>
     {/if}
@@ -235,4 +269,5 @@
 
 {#if chartCard}
   <ChartModal card={chartCard} label={exchanges[chartCard.exchange]?.label} onClose={() => (chartCard = null)} />
+{/if}
 {/if}

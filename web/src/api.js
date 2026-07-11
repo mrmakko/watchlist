@@ -5,6 +5,12 @@ async function json(url, opts) {
   return res.json();
 }
 
+export const getAuthStatus = () => json('/api/auth/status');
+export const login = (pin) => json('/api/auth/login', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin })
+});
+export const logout = () => json('/api/auth/logout', { method: 'POST' });
+
 export const getTickers = () => json('/api/tickers');
 export const getWatchlist = () => json('/api/watchlist');
 export const getExchanges = () => json('/api/exchanges');

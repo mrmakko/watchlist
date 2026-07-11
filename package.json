@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "heroku-postbuild": "npm run build",
     "start": "node server/index.js",
     "serve": "npm run build && npm start",
     "dev:web": "vite",

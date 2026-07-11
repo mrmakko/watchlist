@@ -41,3 +41,17 @@ UI or by hand; it won't be committed.
 - `npm run dev:web` — Vite dev server (HMR, proxies `/api` to :3000)
 
 `PORT` env var overrides the default 3000.
+# Authentication
+
+The server requires two environment variables:
+
+```text
+WATCHLIST_PIN=123456
+AUTH_SECRET=a-long-random-secret-of-at-least-32-characters
+```
+
+Set `NODE_ENV=production` when serving over HTTPS so the session cookie is marked `Secure`.
+The production cookie uses the host-only `__Host-` prefix, so it is scoped to
+`wl.proofnest.org` and is not shared with other `proofnest.org` subdomains.
+Five failed PIN attempts from one IP cause a 15-minute lockout. If the reverse proxy
+does not connect directly to Node, set `TRUST_PROXY_HOPS` to the exact proxy hop count.

@@ -5,9 +5,14 @@ import { allTickers, dropTicker } from './cache.js';
 import { loadWatchlist, saveWatchlist, cardId } from './watchlist.js';
 import { startPoller, pollCard } from './poller.js';
 import { EXCHANGES, isSupported, fetchCandles } from './adapters/index.js';
+import { authHeaders, authRoutes, requireAuth } from './auth.js';
 
 const app = express();
 app.use(express.json());
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 0));
+app.use(authHeaders);
+authRoutes(app);
+app.use('/api', requireAuth);
 
 // --- API ---
 

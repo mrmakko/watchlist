@@ -11,3 +11,4 @@ data/watchlist.json
 .claude/
 .DS_Store
 *.log
+.env
