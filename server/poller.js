@@ -11,6 +11,17 @@ import { loadWatchlist, removeCards } from './watchlist.js';
 
 let loopCount = 0;
 let timer = null;
+let runningPoll = null;
+let pollerGeneration = 0;
+
+function mb(bytes) {
+  return Math.round(bytes / 1024 / 1024);
+}
+
+function memorySummary() {
+  const memory = process.memoryUsage();
+  return `rss=${mb(memory.rss)}MB heap=${mb(memory.heapUsed)}/${mb(memory.heapTotal)}MB external=${mb(memory.external)}MB arrayBuffers=${mb(memory.arrayBuffers)}MB`;
+}
 
 // Run async fn over items with a bounded concurrency pool.
 async function pool(items, limit, fn) {
@@ -50,20 +61,41 @@ async function pollOne(card, withSparkline) {
 }
 
 // One full pass over the current watchlist. Auto-drops unsupported/nonexistent cards.
-export async function pollOnce() {
-  const cards = await loadWatchlist();
+async function runPoll() {
+  const startedAt = Date.now();
   const withSparkline = loopCount % SPARKLINE_EVERY_N_LOOPS === 0;
   loopCount += 1;
+  let cards = [];
   const drops = [];
-  await pool(cards, POLL_CONCURRENCY, async (card) => {
-    const dropId = await pollOne(card, withSparkline);
-    if (dropId) drops.push(dropId);
-  });
-  if (drops.length) {
-    for (const id of drops) dropTicker(id);
-    await removeCards(drops);
-    console.log('dropped cards:', drops.join(', '));
+  let outcome = 'ok';
+  try {
+    cards = await loadWatchlist();
+    await pool(cards, POLL_CONCURRENCY, async (card) => {
+      const dropId = await pollOne(card, withSparkline);
+      if (dropId) drops.push(dropId);
+    });
+    if (drops.length) {
+      for (const id of drops) dropTicker(id);
+      await removeCards(drops);
+      console.log('dropped cards:', drops.join(', '));
+    }
+  } catch (error) {
+    outcome = 'failed';
+    throw error;
+  } finally {
+    console.log(
+      `poll ${outcome}: cards=${cards.length} dropped=${drops.length} sparkline=${withSparkline} duration=${Date.now() - startedAt}ms ${memorySummary()}`
+    );
   }
+}
+
+// Coalesce callers onto the current pass so two full polls can never overlap.
+export function pollOnce() {
+  if (runningPoll) return runningPoll;
+  runningPoll = runPoll().finally(() => {
+    runningPoll = null;
+  });
+  return runningPoll;
 }
 
 // Immediate single-card fetch (used when a card is added).
@@ -82,12 +114,25 @@ export async function pollCard(card) {
 }
 
 export function startPoller() {
-  pollOnce().catch((e) => console.error('initial poll failed', e));
-  timer = setInterval(() => {
-    pollOnce().catch((e) => console.error('poll failed', e));
-  }, TICKER_INTERVAL_MS);
+  stopPoller();
+  const generation = pollerGeneration;
+
+  const runAndSchedule = async () => {
+    try {
+      await pollOnce();
+    } catch (e) {
+      console.error('poll failed', e);
+    }
+    if (generation !== pollerGeneration) return;
+    timer = setTimeout(runAndSchedule, TICKER_INTERVAL_MS);
+  };
+
+  // Fetch immediately on startup, then leave a full interval between passes.
+  void runAndSchedule();
 }
 
 export function stopPoller() {
-  if (timer) clearInterval(timer);
+  pollerGeneration += 1;
+  if (timer) clearTimeout(timer);
+  timer = null;
 }
