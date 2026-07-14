@@ -52,6 +52,21 @@ function getInstance(exchangeId, type) {
   return ex;
 }
 
+// CCXT keeps the promise created by loadMarkets(). If the initial request
+// rejects, that rejected promise is otherwise reused forever. Clear exactly
+// that failed attempt so the next poll can retry, while preserving successful
+// market caches and any newer load that may already have started.
+async function ensureMarkets(ex) {
+  const result = ex.loadMarkets();
+  const loading = ex.marketsLoading;
+  try {
+    await result;
+  } catch (err) {
+    if (ex.marketsLoading === loading) ex.marketsLoading = undefined;
+    throw err;
+  }
+}
+
 export function isSupported(exchangeId) {
   return Boolean(EXCHANGES[exchangeId] && EXCHANGES[exchangeId].supported);
 }
@@ -66,6 +81,7 @@ export function isBadSymbol(err) {
 export async function fetchTicker({ exchange, symbol, type }) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
+  await ensureMarkets(ex);
   const t = await ex.fetchTicker(symbol);
   let pct = t.percentage;
   if ((pct === undefined || pct === null) && t.open && t.last) {
@@ -78,6 +94,7 @@ export async function fetchTicker({ exchange, symbol, type }) {
 export async function fetchSparkline({ exchange, symbol, type }, timeframe, limit) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
+  await ensureMarkets(ex);
   if (!ex.has.fetchOHLCV) return null;
   const since = ex.milliseconds() - 24 * 60 * 60 * 1000;
   const ohlcv = await ex.fetchOHLCV(symbol, timeframe, since, limit);
@@ -90,6 +107,7 @@ export async function fetchSparkline({ exchange, symbol, type }, timeframe, limi
 export async function fetchCandles({ exchange, symbol, type }, timeframe, spanMs) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
+  await ensureMarkets(ex);
   if (!ex.has.fetchOHLCV) throw new Error(`${exchange} has no OHLCV`);
   // Fall back to a supported timeframe if the requested one is missing.
   let tf = timeframe;
