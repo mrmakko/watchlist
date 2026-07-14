@@ -5,7 +5,7 @@ import {
   SPARKLINE_POINTS,
   POLL_CONCURRENCY
 } from './config.js';
-import { fetchTicker, fetchSparkline, isSupported, isBadSymbol } from './adapters/index.js';
+import { fetchTicker, fetchTickers, fetchSparkline, isSupported, isBadSymbol } from './adapters/index.js';
 import { setTicker, dropTicker } from './cache.js';
 import { loadWatchlist, removeCards } from './watchlist.js';
 
@@ -23,57 +23,106 @@ function memorySummary() {
   return `rss=${mb(memory.rss)}MB heap=${mb(memory.heapUsed)}/${mb(memory.heapTotal)}MB external=${mb(memory.external)}MB arrayBuffers=${mb(memory.arrayBuffers)}MB`;
 }
 
-// Run async fn over items with a bounded concurrency pool.
 async function pool(items, limit, fn) {
   const queue = [...items];
-  const workers = Array.from({ length: limit }, async () => {
-    while (queue.length) {
-      const item = queue.shift();
-      await fn(item);
-    }
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) await fn(queue.shift());
   });
   await Promise.all(workers);
 }
 
-// Returns card.id when the card should be dropped (unsupported exchange or
-// nonexistent symbol), otherwise null.
-async function pollOne(card, withSparkline) {
-  if (!isSupported(card.exchange)) return card.id; // skip unsupported, drop it
+async function pollOne(card, stats) {
+  if (!isSupported(card.exchange)) return card.id;
   try {
-    const { last, changePct24h } = await fetchTicker(card);
-    const patch = { ...card, last, changePct24h, updated: Date.now(), stale: false, error: null };
-    if (withSparkline) {
-      try {
-        const sparkline = await fetchSparkline(card, SPARKLINE_TIMEFRAME, SPARKLINE_POINTS);
-        if (sparkline && sparkline.length) patch.sparkline = sparkline;
-      } catch {
-        /* sparkline optional — keep last good one */
-      }
-    }
-    setTicker(card.id, patch);
+    stats.individualRequests += 1;
+    const ticker = await fetchTicker(card);
+    setTicker(card.id, { ...card, ...ticker, updated: Date.now(), stale: false, error: null });
     return null;
   } catch (err) {
-    if (isBadSymbol(err)) return card.id; // pair does not exist — drop it
-    // transient (network/rate) — keep card, mark stale, retry next loop
+    if (isBadSymbol(err)) return card.id;
     setTicker(card.id, { ...card, stale: true, error: err.message || 'fetch failed' });
     return null;
   }
 }
 
-// One full pass over the current watchlist. Auto-drops unsupported/nonexistent cards.
+async function pollGroup(cards, stats, drops) {
+  const [first] = cards;
+  if (!isSupported(first.exchange)) {
+    drops.push(...cards.map((card) => card.id));
+    return [];
+  }
+
+  let batch = null;
+  try {
+    batch = await fetchTickers(first, cards.map((card) => card.symbol));
+    if (batch) stats.batchRequests += 1;
+  } catch {
+    // Batch failures may be transient or caused by one symbol. Fall back to
+    // established per-card handling and never mass-drop an exchange group.
+    stats.batchRequests += 1;
+    stats.batchFailures += 1;
+  }
+
+  const fallback = [];
+  if (batch) {
+    for (const card of cards) {
+      const ticker = batch.get(card.symbol);
+      if (ticker) {
+        setTicker(card.id, { ...card, ...ticker, updated: Date.now(), stale: false, error: null });
+        stats.batchCards += 1;
+      } else {
+        fallback.push(card);
+      }
+    }
+  } else {
+    fallback.push(...cards);
+  }
+
+  return fallback;
+}
+
+async function refreshSparklines(cards, stats) {
+  await pool(cards, POLL_CONCURRENCY, async (card) => {
+    if (!isSupported(card.exchange)) return;
+    try {
+      stats.sparklineRequests += 1;
+      const sparkline = await fetchSparkline(card, SPARKLINE_TIMEFRAME, SPARKLINE_POINTS);
+      if (sparkline && sparkline.length) setTicker(card.id, { sparkline });
+    } catch {
+      // Sparkline is optional; retain the last successful value.
+    }
+  });
+}
+
 async function runPoll() {
   const startedAt = Date.now();
   const withSparkline = loopCount % SPARKLINE_EVERY_N_LOOPS === 0;
   loopCount += 1;
   let cards = [];
   const drops = [];
+  const stats = { batchRequests: 0, batchFailures: 0, batchCards: 0, individualRequests: 0, sparklineRequests: 0 };
   let outcome = 'ok';
   try {
     cards = await loadWatchlist();
-    await pool(cards, POLL_CONCURRENCY, async (card) => {
-      const dropId = await pollOne(card, withSparkline);
+    const groups = new Map();
+    for (const card of cards) {
+      const key = `${card.exchange}:${card.type}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(card);
+    }
+    const fallbacks = [];
+    await pool([...groups.values()], POLL_CONCURRENCY, async (group) => {
+      fallbacks.push(...await pollGroup(group, stats, drops));
+    });
+    // Keep one global concurrency cap; nested pools would multiply the limit.
+    await pool(fallbacks, POLL_CONCURRENCY, async (card) => {
+      const dropId = await pollOne(card, stats);
       if (dropId) drops.push(dropId);
     });
+    if (withSparkline) {
+      const dropped = new Set(drops);
+      await refreshSparklines(cards.filter((card) => !dropped.has(card.id)), stats);
+    }
     if (drops.length) {
       for (const id of drops) dropTicker(id);
       await removeCards(drops);
@@ -84,12 +133,14 @@ async function runPoll() {
     throw error;
   } finally {
     console.log(
-      `poll ${outcome}: cards=${cards.length} dropped=${drops.length} sparkline=${withSparkline} duration=${Date.now() - startedAt}ms ${memorySummary()}`
+      `poll ${outcome}: cards=${cards.length} dropped=${drops.length} sparkline=${withSparkline} ` +
+      `requests=batch:${stats.batchRequests} batchFailures:${stats.batchFailures} batchCards:${stats.batchCards} ` +
+      `individual:${stats.individualRequests} sparkline:${stats.sparklineRequests} ` +
+      `duration=${Date.now() - startedAt}ms ${memorySummary()}`
     );
   }
 }
 
-// Coalesce callers onto the current pass so two full polls can never overlap.
 export function pollOnce() {
   if (runningPoll) return runningPoll;
   runningPoll = runPoll().finally(() => {
@@ -98,17 +149,15 @@ export function pollOnce() {
   return runningPoll;
 }
 
-// Immediate single-card fetch (used when a card is added).
-// Throws on bad symbol / unsupported so the caller can reject the add.
 export async function pollCard(card) {
   if (!isSupported(card.exchange)) throw new Error(`unsupported exchange: ${card.exchange}`);
-  const { last, changePct24h } = await fetchTicker(card);
-  const patch = { ...card, last, changePct24h, updated: Date.now(), stale: false, error: null };
+  const ticker = await fetchTicker(card);
+  const patch = { ...card, ...ticker, updated: Date.now(), stale: false, error: null };
   try {
     const sparkline = await fetchSparkline(card, SPARKLINE_TIMEFRAME, SPARKLINE_POINTS);
     if (sparkline && sparkline.length) patch.sparkline = sparkline;
   } catch {
-    /* sparkline optional */
+    // Sparkline is optional.
   }
   setTicker(card.id, patch);
 }
@@ -116,7 +165,6 @@ export async function pollCard(card) {
 export function startPoller() {
   stopPoller();
   const generation = pollerGeneration;
-
   const runAndSchedule = async () => {
     try {
       await pollOnce();
@@ -126,8 +174,6 @@ export function startPoller() {
     if (generation !== pollerGeneration) return;
     timer = setTimeout(runAndSchedule, TICKER_INTERVAL_MS);
   };
-
-  // Fetch immediately on startup, then leave a full interval between passes.
   void runAndSchedule();
 }
 

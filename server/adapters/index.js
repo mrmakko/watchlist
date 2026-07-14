@@ -77,17 +77,36 @@ export function isBadSymbol(err) {
   return err instanceof ccxt.BadSymbol || /does not have market symbol|symbol .* not found/i.test(err?.message || '');
 }
 
+function normalizeTicker(t) {
+  let pct = t?.percentage;
+  if ((pct === undefined || pct === null) && t?.open && t?.last) {
+    pct = ((t.last - t.open) / t.open) * 100;
+  }
+  return { last: t?.last ?? null, changePct24h: pct ?? null };
+}
+
 // Fetch one ticker: { last, changePct24h }.
 export async function fetchTicker({ exchange, symbol, type }) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
   await ensureMarkets(ex);
   const t = await ex.fetchTicker(symbol);
-  let pct = t.percentage;
-  if ((pct === undefined || pct === null) && t.open && t.last) {
-    pct = ((t.last - t.open) / t.open) * 100;
+  return normalizeTicker(t);
+}
+
+// Fetch several tickers in one request when the adapter supports it. A null
+// result tells the poller to use the individual fetchTicker path instead.
+export async function fetchTickers({ exchange, type }, symbols) {
+  const ex = getInstance(exchange, type);
+  if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
+  await ensureMarkets(ex);
+  if (!ex.has.fetchTickers) return null;
+  const tickers = await ex.fetchTickers([...new Set(symbols)]);
+  const result = new Map();
+  for (const [key, ticker] of Object.entries(tickers || {})) {
+    result.set(ticker?.symbol || key, normalizeTicker(ticker));
   }
-  return { last: t.last ?? null, changePct24h: pct ?? null };
+  return result;
 }
 
 // Fetch 24h sparkline as an array of close prices.
