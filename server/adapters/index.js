@@ -65,12 +65,23 @@ function marketState(ex) {
   return state;
 }
 
+// Watchlist entries may use either CCXT's canonical symbol (ETH/USDT) or an
+// exchange market ID (ETHUSDT). CCXT accepts both, so resolve both forms
+// before deciding whether a requested market is already retained.
+function resolveMarket(ex, symbol) {
+  if (ex.markets?.[symbol]) return ex.markets[symbol];
+  const matches = ex.markets_by_id?.[symbol];
+  if (!matches) return null;
+  const markets = Array.isArray(matches) ? matches : [matches];
+  const defaultType = ex.options?.defaultType || ex.options?.defaultSubType || 'spot';
+  return markets.find((market) => market?.[defaultType]) || markets[0] || null;
+}
+
 function trimMarkets(ex, state) {
-  const allMarkets = ex.markets || {};
   const markets = {};
   for (const symbol of state.symbols) {
-    const market = allMarkets[symbol];
-    if (market) markets[symbol] = market;
+    const market = resolveMarket(ex, symbol);
+    if (market?.symbol) markets[market.symbol] = market;
   }
 
   // Keep ID lookups for the retained markets: several CCXT parsers use an
@@ -98,7 +109,7 @@ async function loadAndTrimMarkets(ex, state, reload) {
       await result;
       state.loaded = true;
       for (const symbol of state.symbols) {
-        if (!ex.markets?.[symbol]) state.missing.add(symbol);
+        if (!resolveMarket(ex, symbol)) state.missing.add(symbol);
       }
       trimMarkets(ex, state);
       // A resolved Promise keeps the full map returned by loadMarkets() alive.
@@ -125,7 +136,7 @@ async function ensureMarkets(ex, symbols = []) {
   for (const symbol of symbols) state.symbols.add(symbol);
 
   const needsInitialLoad = !state.loaded;
-  const needsNewSymbolLoad = symbols.some((symbol) => !ex.markets?.[symbol] && !state.missing.has(symbol));
+  const needsNewSymbolLoad = symbols.some((symbol) => !resolveMarket(ex, symbol) && !state.missing.has(symbol));
   if (needsInitialLoad || needsNewSymbolLoad) {
     await loadAndTrimMarkets(ex, state, state.loaded);
   }
