@@ -33,6 +33,10 @@ export const EXCHANGES = {
 
 // One ccxt instance per exchange+type (spot vs swap), lazily created and reused.
 const instances = new Map();
+// CCXT keeps a complete exchange catalogue in every instance. A watchlist
+// usually needs only a handful of those markets, so retain just the symbols
+// that have actually been requested from each exchange+type instance.
+const marketCacheStates = new WeakMap();
 
 function getInstance(exchangeId, type) {
   const key = `${exchangeId}:${type}`;
@@ -52,23 +56,96 @@ function getInstance(exchangeId, type) {
   return ex;
 }
 
-// CCXT keeps the promise created by loadMarkets(). If the initial request
-// rejects, that rejected promise is otherwise reused forever. Clear exactly
-// that failed attempt so the next poll can retry, while preserving successful
-// market caches and any newer load that may already have started.
-async function ensureMarkets(ex) {
-  const result = ex.loadMarkets();
-  const loading = ex.marketsLoading;
-  try {
-    await result;
-  } catch (err) {
-    if (ex.marketsLoading === loading) ex.marketsLoading = undefined;
-    throw err;
+function marketState(ex) {
+  let state = marketCacheStates.get(ex);
+  if (!state) {
+    state = { loaded: false, loading: null, symbols: new Set(), missing: new Set() };
+    marketCacheStates.set(ex, state);
   }
+  return state;
+}
+
+function trimMarkets(ex, state) {
+  const allMarkets = ex.markets || {};
+  const markets = {};
+  for (const symbol of state.symbols) {
+    const market = allMarkets[symbol];
+    if (market) markets[symbol] = market;
+  }
+
+  // Keep ID lookups for the retained markets: several CCXT parsers use an
+  // exchange market ID while normalising a ticker response.
+  const marketsById = {};
+  for (const market of Object.values(markets)) {
+    if (!market?.id) continue;
+    if (!marketsById[market.id]) marketsById[market.id] = [];
+    marketsById[market.id].push(market);
+  }
+
+  ex.markets = markets;
+  ex.markets_by_id = marketsById;
+  ex.symbols = Object.keys(markets).sort();
+  ex.ids = Object.keys(marketsById).sort();
+}
+
+async function loadAndTrimMarkets(ex, state, reload) {
+  if (state.loading) return state.loading;
+
+  state.loading = (async () => {
+    const result = ex.loadMarkets(reload);
+    const loading = ex.marketsLoading;
+    try {
+      await result;
+      state.loaded = true;
+      for (const symbol of state.symbols) {
+        if (!ex.markets?.[symbol]) state.missing.add(symbol);
+      }
+      trimMarkets(ex, state);
+      // A resolved Promise keeps the full map returned by loadMarkets() alive.
+      // We own market loading above, so release CCXT's promise after trimming.
+      if (ex.marketsLoading === loading) ex.marketsLoading = undefined;
+    } catch (err) {
+      if (ex.marketsLoading === loading) ex.marketsLoading = undefined;
+      throw err;
+    }
+  })();
+
+  try {
+    await state.loading;
+  } finally {
+    state.loading = null;
+  }
+}
+
+// Load the full catalogue only on first use, or when a newly added watchlist
+// symbol is not in the retained subset. Invalid symbols are remembered so a
+// bad card cannot trigger a full catalogue reload on every poll.
+async function ensureMarkets(ex, symbols = []) {
+  const state = marketState(ex);
+  for (const symbol of symbols) state.symbols.add(symbol);
+
+  const needsInitialLoad = !state.loaded;
+  const needsNewSymbolLoad = symbols.some((symbol) => !ex.markets?.[symbol] && !state.missing.has(symbol));
+  if (needsInitialLoad || needsNewSymbolLoad) {
+    await loadAndTrimMarkets(ex, state, state.loaded);
+  }
+
+  trimMarkets(ex, state);
 }
 
 export function isSupported(exchangeId) {
   return Boolean(EXCHANGES[exchangeId] && EXCHANGES[exchangeId].supported);
+}
+
+// The poller calls this once per exchange/type group, so deleted cards are
+// released from the retained catalogue on the following refresh.
+export function syncMarketSymbols({ exchange, type }, symbols) {
+  const ex = instances.get(`${exchange}:${type}`);
+  if (!ex) return;
+  const state = marketState(ex);
+  state.symbols = new Set(symbols);
+  state.missing = new Set([...state.missing].filter((symbol) => state.symbols.has(symbol)));
+  if (state.loaded) trimMarkets(ex, state);
 }
 
 // True when the error means the symbol does not exist on the exchange
@@ -89,7 +166,7 @@ function normalizeTicker(t) {
 export async function fetchTicker({ exchange, symbol, type }) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
-  await ensureMarkets(ex);
+  await ensureMarkets(ex, [symbol]);
   const t = await ex.fetchTicker(symbol);
   return normalizeTicker(t);
 }
@@ -99,9 +176,10 @@ export async function fetchTicker({ exchange, symbol, type }) {
 export async function fetchTickers({ exchange, type }, symbols) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
-  await ensureMarkets(ex);
+  const uniqueSymbols = [...new Set(symbols)];
+  await ensureMarkets(ex, uniqueSymbols);
   if (!ex.has.fetchTickers) return null;
-  const tickers = await ex.fetchTickers([...new Set(symbols)]);
+  const tickers = await ex.fetchTickers(uniqueSymbols);
   const result = new Map();
   for (const [key, ticker] of Object.entries(tickers || {})) {
     result.set(ticker?.symbol || key, normalizeTicker(ticker));
@@ -113,7 +191,7 @@ export async function fetchTickers({ exchange, type }, symbols) {
 export async function fetchSparkline({ exchange, symbol, type }, timeframe, limit) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
-  await ensureMarkets(ex);
+  await ensureMarkets(ex, [symbol]);
   if (!ex.has.fetchOHLCV) return null;
   const since = ex.milliseconds() - 24 * 60 * 60 * 1000;
   const ohlcv = await ex.fetchOHLCV(symbol, timeframe, since, limit);
@@ -126,7 +204,7 @@ export async function fetchSparkline({ exchange, symbol, type }, timeframe, limi
 export async function fetchCandles({ exchange, symbol, type }, timeframe, spanMs) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
-  await ensureMarkets(ex);
+  await ensureMarkets(ex, [symbol]);
   if (!ex.has.fetchOHLCV) throw new Error(`${exchange} has no OHLCV`);
   // Fall back to a supported timeframe if the requested one is missing.
   let tf = timeframe;

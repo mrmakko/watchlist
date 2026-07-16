@@ -5,7 +5,7 @@ import {
   SPARKLINE_POINTS,
   POLL_CONCURRENCY
 } from './config.js';
-import { fetchTicker, fetchTickers, fetchSparkline, isSupported, isBadSymbol } from './adapters/index.js';
+import { fetchTicker, fetchTickers, fetchSparkline, isSupported, isBadSymbol, syncMarketSymbols } from './adapters/index.js';
 import { setTicker, dropTicker } from './cache.js';
 import { loadWatchlist, removeCards } from './watchlist.js';
 
@@ -109,6 +109,10 @@ async function runPoll() {
       const key = `${card.exchange}:${card.type}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(card);
+    }
+    for (const group of groups.values()) {
+      const [first] = group;
+      syncMarketSymbols(first, group.map((card) => card.symbol));
     }
     const fallbacks = [];
     await pool([...groups.values()], POLL_CONCURRENCY, async (group) => {
