@@ -1,0 +1,19 @@
+# Version control and local agent/editor state
+.git
+.agents
+.claude
+.codex
+
+# Local dependencies and build artefacts are rebuilt in the image
+node_modules
+web/dist
+
+# Personal persistent data must never become an image layer
+data/watchlist.json
+
+# Local configuration and transient files
+.env
+*.log
+*.bat
+.DS_Store
+README.md
