@@ -1,5 +1,5 @@
 # Build the Svelte client with the development toolchain, then discard it.
-FROM node:22-slim AS build
+FROM node:24-slim AS build
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ RUN npm run build
 RUN npm prune --omit=dev && npm cache clean --force
 
 
-FROM node:22-slim AS runtime
+FROM node:24-slim AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app
