@@ -71,10 +71,20 @@ function marketState(ex) {
 function resolveMarket(ex, symbol) {
   if (ex.markets?.[symbol]) return ex.markets[symbol];
   const matches = ex.markets_by_id?.[symbol];
-  if (!matches) return null;
-  const markets = Array.isArray(matches) ? matches : [matches];
   const defaultType = ex.options?.defaultType || ex.options?.defaultSubType || 'spot';
-  return markets.find((market) => market?.[defaultType]) || markets[0] || null;
+  if (matches) {
+    const markets = Array.isArray(matches) ? matches : [matches];
+    return markets.find((market) => market?.[defaultType]) || markets[0] || null;
+  }
+
+  // CCXT denotes settled perpetuals as BASE/QUOTE:SETTLE (for example,
+  // Aster's NES/USDT:USDT). The add form intentionally accepts the shorter
+  // BASE/QUOTE spelling, so resolve it when it unambiguously identifies the
+  // requested market type.
+  const settled = Object.values(ex.markets || {}).filter((market) =>
+    market?.[defaultType] && market.symbol?.startsWith(`${symbol}:`)
+  );
+  return settled.length === 1 ? settled[0] : null;
 }
 
 function trimMarkets(ex, state) {
@@ -178,7 +188,8 @@ export async function fetchTicker({ exchange, symbol, type }) {
   const ex = getInstance(exchange, type);
   if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
   await ensureMarkets(ex, [symbol]);
-  const t = await ex.fetchTicker(symbol);
+  const market = resolveMarket(ex, symbol);
+  const t = await ex.fetchTicker(market?.symbol || symbol);
   return normalizeTicker(t);
 }
 
@@ -190,10 +201,18 @@ export async function fetchTickers({ exchange, type }, symbols) {
   const uniqueSymbols = [...new Set(symbols)];
   await ensureMarkets(ex, uniqueSymbols);
   if (!ex.has.fetchTickers) return null;
-  const tickers = await ex.fetchTickers(uniqueSymbols);
+  const requested = uniqueSymbols.map((symbol) => ({
+    symbol,
+    market: resolveMarket(ex, symbol)
+  }));
+  const tickers = await ex.fetchTickers(requested.map(({ symbol, market }) => market?.symbol || symbol));
   const result = new Map();
-  for (const [key, ticker] of Object.entries(tickers || {})) {
-    result.set(ticker?.symbol || key, normalizeTicker(ticker));
+  for (const { symbol, market } of requested) {
+    const resolvedSymbol = market?.symbol || symbol;
+    const ticker = tickers?.[resolvedSymbol] || Object.values(tickers || {}).find(
+      (item) => item?.symbol === resolvedSymbol
+    );
+    if (ticker) result.set(symbol, normalizeTicker(ticker));
   }
   return result;
 }
@@ -205,7 +224,8 @@ export async function fetchSparkline({ exchange, symbol, type }, timeframe, limi
   await ensureMarkets(ex, [symbol]);
   if (!ex.has.fetchOHLCV) return null;
   const since = ex.milliseconds() - 24 * 60 * 60 * 1000;
-  const ohlcv = await ex.fetchOHLCV(symbol, timeframe, since, limit);
+  const market = resolveMarket(ex, symbol);
+  const ohlcv = await ex.fetchOHLCV(market?.symbol || symbol, timeframe, since, limit);
   // ohlcv rows: [ts, open, high, low, close, volume]
   return ohlcv.map((r) => r[4]).filter((v) => typeof v === 'number');
 }
@@ -223,7 +243,8 @@ export async function fetchCandles({ exchange, symbol, type }, timeframe, spanMs
     tf = ex.timeframes['5m'] ? '5m' : ex.timeframes['1m'] ? '1m' : Object.keys(ex.timeframes)[0];
   }
   const since = ex.milliseconds() - spanMs;
-  const ohlcv = await ex.fetchOHLCV(symbol, tf, since);
+  const market = resolveMarket(ex, symbol);
+  const ohlcv = await ex.fetchOHLCV(market?.symbol || symbol, tf, since);
   return ohlcv
     .filter((r) => r[4] != null)
     .map((r) => ({ time: Math.floor(r[0] / 1000), open: r[1], high: r[2], low: r[3], close: r[4] }));
