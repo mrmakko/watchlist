@@ -5,7 +5,7 @@ import {
   SPARKLINE_POINTS,
   POLL_CONCURRENCY
 } from './config.js';
-import { fetchTicker, fetchTickers, fetchSparkline, isSupported, isBadSymbol, syncMarketSymbols } from './adapters/index.js';
+import { fetchTicker, fetchTickers, fetchSparkline, fetchVolume1h, isSupported, isBadSymbol, syncMarketSymbols } from './adapters/index.js';
 import { setTicker, dropTicker } from './cache.js';
 import { loadWatchlist, removeCards } from './watchlist.js';
 
@@ -13,6 +13,8 @@ let loopCount = 0;
 let timer = null;
 let runningPoll = null;
 let pollerGeneration = 0;
+let lastVolumeRefresh = 0;
+const VOLUME_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 function mb(bytes) {
   return Math.round(bytes / 1024 / 1024);
@@ -94,13 +96,27 @@ async function refreshSparklines(cards, stats) {
   });
 }
 
+async function refreshVolumes(cards, stats) {
+  await pool(cards, POLL_CONCURRENCY, async (card) => {
+    if (!isSupported(card.exchange)) return;
+    try {
+      stats.volumeRequests += 1;
+      const volume1h = await fetchVolume1h(card);
+      if (volume1h !== null) setTicker(card.id, { volume1h });
+    } catch {
+      // Volume is optional; retain the last successful value.
+    }
+  });
+}
+
 async function runPoll() {
   const startedAt = Date.now();
   const withSparkline = loopCount % SPARKLINE_EVERY_N_LOOPS === 0;
+  const withVolume = startedAt - lastVolumeRefresh >= VOLUME_REFRESH_INTERVAL_MS;
   loopCount += 1;
   let cards = [];
   const drops = [];
-  const stats = { batchRequests: 0, batchFailures: 0, batchCards: 0, individualRequests: 0, sparklineRequests: 0 };
+  const stats = { batchRequests: 0, batchFailures: 0, batchCards: 0, individualRequests: 0, sparklineRequests: 0, volumeRequests: 0 };
   let outcome = 'ok';
   try {
     cards = await loadWatchlist();
@@ -127,6 +143,11 @@ async function runPoll() {
       const dropped = new Set(drops);
       await refreshSparklines(cards.filter((card) => !dropped.has(card.id)), stats);
     }
+    if (withVolume) {
+      const dropped = new Set(drops);
+      await refreshVolumes(cards.filter((card) => !dropped.has(card.id)), stats);
+      lastVolumeRefresh = startedAt;
+    }
     if (drops.length) {
       for (const id of drops) dropTicker(id);
       await removeCards(drops);
@@ -139,7 +160,7 @@ async function runPoll() {
     console.log(
       `poll ${outcome}: cards=${cards.length} dropped=${drops.length} sparkline=${withSparkline} ` +
       `requests=batch:${stats.batchRequests} batchFailures:${stats.batchFailures} batchCards:${stats.batchCards} ` +
-      `individual:${stats.individualRequests} sparkline:${stats.sparklineRequests} ` +
+      `individual:${stats.individualRequests} sparkline:${stats.sparklineRequests} volume:${stats.volumeRequests} ` +
       `duration=${Date.now() - startedAt}ms ${memorySummary()}`
     );
   }

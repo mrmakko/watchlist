@@ -180,7 +180,12 @@ function normalizeTicker(t) {
   if ((pct === undefined || pct === null) && t?.open && t?.last) {
     pct = ((t.last - t.open) / t.open) * 100;
   }
-  return { last: t?.last ?? null, changePct24h: pct ?? null };
+  const volume24h = t?.quoteVolume ?? (
+    typeof t?.baseVolume === 'number' && typeof t?.last === 'number'
+      ? t.baseVolume * t.last
+      : null
+  );
+  return { last: t?.last ?? null, changePct24h: pct ?? null, volume24h };
 }
 
 // Fetch one ticker: { last, changePct24h }.
@@ -228,6 +233,21 @@ export async function fetchSparkline({ exchange, symbol, type }, timeframe, limi
   const ohlcv = await ex.fetchOHLCV(market?.symbol || symbol, timeframe, since, limit);
   // ohlcv rows: [ts, open, high, low, close, volume]
   return ohlcv.map((r) => r[4]).filter((v) => typeof v === 'number');
+}
+
+// Estimate the current hourly notional volume from its OHLCV candle. Exchange
+// OHLCV volumes are normally denominated in the base asset, so close × volume
+// gives the quote-currency amount shown on the card.
+export async function fetchVolume1h({ exchange, symbol, type }) {
+  const ex = getInstance(exchange, type);
+  if (!ex) throw new Error(`unsupported exchange: ${exchange}`);
+  await ensureMarkets(ex, [symbol]);
+  if (!ex.has.fetchOHLCV) return null;
+  const market = resolveMarket(ex, symbol);
+  const ohlcv = await ex.fetchOHLCV(market?.symbol || symbol, '1h', undefined, 1);
+  const candle = ohlcv?.at(-1);
+  if (!candle || typeof candle[4] !== 'number' || typeof candle[5] !== 'number') return null;
+  return candle[4] * candle[5];
 }
 
 // Fetch OHLC candles for the chart popup. Returns lightweight-charts shape:

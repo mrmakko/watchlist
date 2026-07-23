@@ -2,7 +2,7 @@
   import Sparkline from './Sparkline.svelte';
   import { colorOf } from './colors.js';
 
-  // card: { id, exchange, symbol, type, color, last, changePct24h, sparkline, stale }
+  // card: { id, exchange, symbol, type, color, last, changePct24h, volume24h, volume1h, sparkline, stale }
   // group props: groupSize, isCollapsed (group collapsed), isRep (representative of group), hidden
   let {
     card,
@@ -45,6 +45,15 @@
   }
 
   const fmtPct = (v) => (v === null ? '' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
+
+  function fmtVolume(v) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
+    const abs = Math.abs(v);
+    if (abs >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+    if (abs >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+    if (abs >= 1e3) return `$${(v / 1e3).toFixed(1)}K`;
+    return `$${v.toFixed(0)}`;
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -93,7 +102,13 @@
   </div>
   <div class="pair">{base}<span class="quote">/{quote}</span></div>
 
-  <div class="row"><Sparkline points={card.sparkline} {up} /></div>
+  <div class="row">
+    <Sparkline points={card.sparkline} {up} />
+    <span class="volume" title="Volume">
+      <span>{fmtVolume(card.volume24h)}</span>
+      <span class={card.volume1h === 0 ? 'volume-zero' : ''}>{fmtVolume(card.volume1h)}</span>
+    </span>
+  </div>
 
   <div class="bottom">
     <span class="price">{fmtPrice(card.last)}</span>
@@ -162,10 +177,12 @@
   .pair { font-size: 14px; font-weight: 600; color: var(--fg); line-height: 1.1; }
   .quote { color: var(--fg-dim); font-weight: 400; font-size: 11px; }
 
-  .row { margin: 1px 0; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin: 1px 0; }
 
   .bottom { display: flex; align-items: baseline; justify-content: space-between; margin-top: auto; }
   .price { font-size: 15px; font-weight: 700; color: var(--fg); }
+  .volume { display: flex; flex-direction: column; align-items: flex-end; font-size: 9px; line-height: 1.35; color: var(--fg-dim); white-space: nowrap; cursor: help; }
+  .volume .volume-zero { color: var(--down); font-weight: 600; }
   .pct { font-size: 11px; font-weight: 600; color: var(--up); }
   .pct.down { color: var(--down); }
   .pct.na { color: var(--fg-dim); }
