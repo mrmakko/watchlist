@@ -20,7 +20,7 @@
   let alive = true;
   let error = $state(null);
   let loading = $state(true);
-  let sel = $state('5m');
+  let sel = $state('15m');
 
   const base = $derived((card.symbol || '').split('/')[0]);
   const quote = $derived((card.symbol || '').split('/')[1] || '');
